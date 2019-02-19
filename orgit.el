@@ -385,6 +385,76 @@ store links to the Magit-Revision mode buffers for these commits."
             (abbreviate-file-name default-directory)
             (magit-read-branch-or-commit "Revision"))))
 
+;;; Topic
+
+;;;###autoload
+(eval-after-load "org"
+  '(orgit-link-set-parameters "orgit-topic"
+                              :store    'orgit-topic-store
+                              :follow   'orgit-topic-open
+                              :export   'orgit-topic-export
+                              :complete 'orgit-topic-complete-link))
+
+;;;###autoload
+(defun orgit-topic-store ()
+  "Store a link to a Forge-Topic mode buffer.
+
+When the region selects a topic, then store a link to the
+Forge-Topic mode buffer for that topic."
+  (cond
+   ((and (derived-mode-p 'magit-mode)
+         (or (magit-region-sections 'issue)
+             (magit-region-sections 'pullreq)))
+    (orgit-topic-store-1 (oref (magit-current-section) value)))
+   ((eq major-mode 'forge-topic-mode)
+    (orgit-topic-store-1 (car magit-refresh-args)))
+   ))
+
+(defun orgit-topic-store-1 (topic)
+  (let ((prefix (forge--topic-type-prefix topic))
+        (number (oref topic number)))
+    (org-store-link-props
+     :type "orgit-topic"
+     :link (format "orgit-topic:%s::%s%s"
+                   (abbreviate-file-name default-directory)
+                   prefix number)
+     :description (let ((repo (forge-get-repository t)))
+                    (format "%s%s %s (%s/%s)" prefix number
+                            (oref topic title)
+                            (oref repo owner)
+                            (oref repo name))))))
+
+;;;###autoload
+(defun orgit-topic-open (path)
+  (pcase-let*
+      ((`(,dir ,str) (split-string path "::"))
+       (default-directory (file-name-as-directory (expand-file-name dir))))
+    (forge-visit (forge-get-topic str (forge-get-repository t)))))
+
+;;;###autoload
+(defun orgit-topic-export (path desc format)
+  (pcase-let*
+      ((`(,dir ,str) (split-string path "::"))
+       (default-directory (file-name-as-directory (expand-file-name dir))))
+    (forge-get-url (forge-get-topic str (forge-get-repository t)))))
+
+;;;###autoload
+(defun orgit-topic-complete-link (&optional arg)
+  (let ((default-directory (magit-read-repository arg)))
+    (format "orgit-topic:%s::%s"
+            (abbreviate-file-name default-directory)
+            (oref (forge-read-topic "Topic") number))))
+
+;; also use in forge-read-topic
+(cl-defmethod forge-get-topic ((string string) repo)
+  (save-match-data
+    (when-let ((number (and (string-match "\\`\\([!#]*\\)\\([0-9]+\\)" string)
+                            (string-to-number (match-string 2 string)))))
+      (if (equal (match-string 1 string) "!")
+          (forge-get-pullreq repo number)
+        (or (forge-get-issue repo number)
+            (forge-get-pullreq repo number))))))
+
 ;;; Export
 
 (defun orgit-export (path desc format gitvar idx)
